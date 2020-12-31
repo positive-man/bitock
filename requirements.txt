@@ -1,0 +1,4 @@
+pybithumb
+matplotlib
+websocket-client
+slack_sdk
