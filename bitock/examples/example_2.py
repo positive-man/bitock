@@ -96,18 +96,18 @@ class Simulator:
         prv_ma_20 = sum(close_list[-21:-1]) / 20
 
         decision = None
-
+        return_rate = 0
         if not self.holding and cur_price > cur_ma_20 and prv_price < prv_ma_20:
             decision = Decision.BUY
             self.holding = True
             self.buy_price = cur_price
         elif self.holding:
-            if cur_price < cur_ma_5 and prv_price > prv_ma_5:
+            return_rate = (cur_price / self.buy_price - 1) * 100
+            if return_rate > 2 or return_rate < -2:
                 decision = Decision.SELL
                 self.holding = False
 
         if decision:
-            return_rate = (cur_price / self.buy_price - 1) * 100
             elements = [
                 decision,
                 self.ticker,
