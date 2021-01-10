@@ -3,6 +3,7 @@ import threading
 import time
 from dataclasses import dataclass
 from enum import Enum
+from multiprocessing.pool import ThreadPool
 from queue import Queue
 from typing import *
 
@@ -78,9 +79,11 @@ class WsApi(Generic[T]):
         self.ws = websocket.WebSocket()
         self.subscribers: List[Callable[[T]], None] = []
         self.stopped = False
+        self.queue = Queue()
 
     def subscribe(self, subscriber: Callable[[T], None]):
         self.subscribers.append(subscriber)
+        return self
 
     def connect(self):
         logger.info(f'Connecting to Bithumb Websocket API...')
@@ -88,21 +91,36 @@ class WsApi(Generic[T]):
         logger.info(f'Connection Response: {self.ws.recv()}')
         self.ws.send(self.subscription_request.serialize())
         logger.info(f'Subscription Response: {self.ws.recv()}')
-        while not self.stopped:
-            # 구독자 없으면, 데이터 받지 않음
-            if not self.subscribers:
-                time.sleep(0.1)
-                continue
 
-            received = self.ws.recv()
-            data = deserialize(received, self.type_hint)
+        self.start_receive()
+        self.start_consume()
+
+    def start_receive(self):
+        def in_thread():
+            while not self.stopped:
+                # 구독자 없으면, 데이터 받지 않음
+                if not self.subscribers:
+                    time.sleep(0.5)
+                    continue
+
+                received = self.ws.recv()
+                data = deserialize(received, self.type_hint)
+                self.queue.put(data)
+
+            self.ws.close()
+
+        threading.Thread(target=in_thread).start()
+
+    def start_consume(self):
+        def consume(data):
             for subscriber in self.subscribers:
                 subscriber(data)
 
-        self.ws.close()
+        with ThreadPool(processes=8) as pool:
+            while not self.stopped:
+                received = self.queue.get()
 
-    def connect_async(self):
-        threading.Thread(target=self.connect).start()
+                pool.apply_async(lambda: consume(received))
 
     def disconnect(self):
         self.stopped = True
@@ -201,17 +219,3 @@ class TransactionApi(WsApi[Transaction]):
                 self.records.get(item.symbol).put(item)
 
         self.subscribe(update)
-
-
-if __name__ == '__main__':
-    from pybithumb import Bithumb
-
-    transaction_api = TransactionApi(symbols=[ticker + '_KRW' for ticker in Bithumb.get_tickers()], tick_types=[TickType.HOUR])
-    transaction_api.subscribe(lambda x: print(x))
-    transaction_api.connect_async()
-
-    order_api = OrderBookDepthApi(symbols=[ticker + '_KRW' for ticker in Bithumb.get_tickers()], tick_types=[TickType.HOUR])
-    order_api.subscribe(lambda x: print(x))
-    order_api.connect()
-
-

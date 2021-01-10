@@ -1,3 +1,7 @@
+"""
+체결 강도 및 매수매도 주문량 기반 알고리즘
+"""
+
 import abc
 import csv
 import dataclasses
@@ -48,7 +52,7 @@ class Order:
 class OrderLogger:
     def __init__(self, name):
         self.name = name
-        self.path = os.path.join('records', f'{self.name}-{now_str()}.csv')
+        self.path = os.path.join('../records', f'{self.name}-{now_str()}.csv')
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
         self.queue = Queue()
         self.queue.put(list(Order.__annotations__.keys()))
@@ -77,6 +81,11 @@ class Worker(abc.ABC):
         pass
 
 
+# 음...
+# 받아와서 큐에 넣어
+# 빼는 놈을 따로 만들어...
+
+
 class VolumnPowerBasedWorker(Worker):
     def __init__(self, symbol, reverse=False):
         self.symbol = symbol
@@ -86,37 +95,45 @@ class VolumnPowerBasedWorker(Worker):
         self.buy_price = 0
 
     def on_received(self, data: bithumb_websock.TickerData):
-        # 체결 강도만 가지고 해보자
-
-        if 90 < float(data.content.volumePower) < 110:
+        orderbooks = bithumb_rest.get_orderbook(self.symbol)
+        data_created = datetime(year=int(data.content.date[:4]),
+                                month=int(data.content.date[4:6]),
+                                day=int(data.content.date[6:8]),
+                                hour=int(data.content.time[:2]),
+                                minute=int(data.content.time[2:4]),
+                                second=int(data.content.time[4:6]))
+        if not orderbooks:
             return
-        else:
-            orderbook = bithumb_rest.get_orderbook(self.symbol)
-            if float(data.content.volumePower) > 110:
-                self.buy(min([float(ask.price) for ask in orderbook.asks]), None)
-            elif float(data.content.volumePower) < 90:
-                self.sell(max(float(bid.price) for bid in orderbook.bids), None)
 
-        # if float(data.content.volumePower) < STRENGTH_THRESHOLD:
-        #     return
-        #
-        # orderbooks = bithumb_rest.get_orderbook(self.symbol)
-        # if orderbooks is None:
-        #     return
-        #
-        # sum_of_asks = sum([float(ask.quantity) for ask in orderbooks.asks])  # 팔고 싶은 애들
-        # sum_of_bids = sum([float(bid.quantity) for bid in orderbooks.bids])  # 사고 싶은 애들
-        #
-        # log = {
-        #     'sum_of_asks': sum_of_asks,
-        #     'sum_of_bids': sum_of_bids,
-        #     'ticker': data,
-        # }
-        #
-        # if sum_of_asks / sum_of_bids > BUY_SELL_THRESHOLD:
-        #     self.buy(min([float(ask.price) for ask in orderbooks.asks]), log)
-        # if sum_of_bids / sum_of_asks > BUY_SELL_THRESHOLD:
-        #     self.sell(max(float(bid.price) for bid in orderbooks.bids), log)
+        sum_of_asks = sum([float(ask.quantity) for ask in orderbooks.asks])  # 팔고 싶은 애들
+        sum_of_bids = sum([float(bid.quantity) for bid in orderbooks.bids])  # 사고 싶은 애들
+
+        detail = {
+            'value': data.content.value,
+            'volume_power': data.content.volumePower,
+            'sum_of_asks': sum_of_asks,
+            'sum_of_bids': sum_of_bids,
+            'data_created': data_created,
+            'max_of_bids': max([bid.price for bid in orderbooks.bids]),
+            'min_of_asks': min([ask.price for ask in orderbooks.asks])
+        }
+
+        if self.holding:  # 가지고 있으면
+            max_of_bids = max(float(bid.price) for bid in orderbooks.bids)
+            min_of_asks = min(float(ask.price) for ask in orderbooks.asks)
+
+            # 현재 수익률
+            return_rate = (max_of_bids / self.buy_price - 1) * 100
+            if return_rate > 2 or return_rate < -2:
+                if abs((max_of_bids / min_of_asks - 1) * 100) > 2:
+                    # 매수/메도 갭 2% 이상
+                    logger.warning(f'max_of_bids({max_of_bids}), min_of_asks({min_of_asks}) 갭 2% 이상')
+                    return
+                else:
+                    self.sell(max_of_bids, detail)
+        elif float(data.content.volumePower) > 110 and sum_of_asks > sum_of_bids * 1.1:
+            if float(data.content.value) > 3000_0000:
+                self.buy(min([float(ask.price) for ask in orderbooks.asks]), detail)
 
     def buy(self, price: float, details: any):
         if self.holding:
@@ -178,6 +195,7 @@ def main():
     ticker_api = bithumb_websock.TickerApi(TICKERS_WITH_KRW, [bithumb_websock.TickType.H_HOUR])
     ticker_api.subscribe(worker_manager.on_received)
     ticker_api.connect()
+    input()
 
 
 if __name__ == '__main__':

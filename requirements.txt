@@ -1,4 +1,6 @@
-pybithumb
+pybithumb~=1.0.14
 matplotlib
-websocket-client
+websocket-client~=0.57.0
 slack_sdk
+datetime~=4.3
+pandas~=1.2.0
