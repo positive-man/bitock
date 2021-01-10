@@ -135,7 +135,7 @@ def main():
     while True:
         delay_looker = threading.Timer(15, lambda : logging.warning('DELAY OCCURS'))
         delay_looker.start()
-        with ThreadPool(processes=4) as pool:
+        with ThreadPool(processes=8) as pool:
             def run(sml):
                 try:
                     sml.decide()
