@@ -1,13 +1,17 @@
+"""
+이동 평균선 기반 매수
+"""
+
 import argparse
 import logging
 import logging.handlers
+import threading
 from datetime import datetime, timedelta
 from enum import Enum
 from multiprocessing.pool import ThreadPool
 
 from pandas import DataFrame
 from pybithumb import Bithumb
-import threading
 
 PAYMENT_CURRENCY = 'KRW'
 
@@ -77,6 +81,7 @@ class Simulator:
         self.ticker = ticker
         self.holding = False
         self.buy_price = 0
+        self.magic_value = None  # 여기다 내맘대로 넣을거임
 
     def decide(self) -> [Decision, float]:
         candlesticks: DataFrame = Bithumb.get_candlestick(order_currency=self.ticker, chart_instervals=args.tick)
@@ -98,6 +103,10 @@ class Simulator:
         decision = None
         return_rate = 0
         if not self.holding and cur_price > cur_ma_20 and prv_price < prv_ma_20:
+            if self.magic_value and self.magic_value == candlesticks.index[-2]:
+                return
+
+            self.magic_value = candlesticks.index[-2]
             decision = Decision.BUY
             self.holding = True
             self.buy_price = cur_price
@@ -133,7 +142,7 @@ def main():
         simulators.append(Simulator(ticker))
 
     while True:
-        delay_looker = threading.Timer(15, lambda : logging.warning('DELAY OCCURS'))
+        delay_looker = threading.Timer(15, lambda: logging.warning('DELAY OCCURS'))
         delay_looker.start()
         with ThreadPool(processes=8) as pool:
             def run(sml):
@@ -144,6 +153,7 @@ def main():
 
             pool.map(run, simulators)
         delay_looker.cancel()
+
 
 if __name__ == '__main__':
     main()
